@@ -150,6 +150,12 @@ export default function Home() {
                   {!user.isOrganizer && (
                     <>
                       <DropdownMenuItem asChild>
+                        <Link href="/dashboard" className="cursor-pointer">
+                          <LayoutDashboard className="mr-2 h-4 w-4" />
+                          Dashboard
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
                         <Link href="/my-tickets" className="cursor-pointer">
                           <Ticket className="mr-2 h-4 w-4" />
                           My Tickets

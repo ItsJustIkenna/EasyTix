@@ -102,8 +102,8 @@ export default function SignupPage() {
         setLocalStorage("token", result.data.token);
         setLocalStorageJSON("user", result.data.user);
 
-        // Redirect to events page
-        router.push("/events");
+        // Redirect to customer dashboard
+        router.push("/dashboard");
       } else {
         // Display validation errors if available
         if (result.details && Array.isArray(result.details)) {

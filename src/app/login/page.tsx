@@ -81,7 +81,8 @@ export default function LoginPage() {
         } else if (result.data.isOrganizer) {
           router.push("/organizer/dashboard");
         } else {
-          router.push("/events");
+          // Redirect customers to their dashboard
+          router.push("/dashboard");
         }
       } else {
         setError(result.error || "Login failed");
