@@ -45,21 +45,50 @@ export default function OrdersManagementPage() {
       setError(null);
       const token = localStorage.getItem("token");
 
-      // Fetch organizer's events first
-      const eventsResponse = await fetch("/api/organizer/events", {
+      // Fetch user profile to get organizer ID
+      const profileResponse = await fetch("/api/auth/me", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
+      
+      if (!profileResponse.ok) {
+        throw new Error("Failed to fetch profile");
+      }
+      
+      const profileData = await profileResponse.json();
+      
+      if (!profileData.success || !profileData.data.organizer) {
+        throw new Error("Organizer profile not found");
+      }
+
+      const organizerId = profileData.data.organizer.id;
+
+      // Fetch all events for this organizer
+      const eventsResponse = await fetch(`/api/events?status=ALL`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      
+      if (!eventsResponse.ok) {
+        throw new Error("Failed to fetch events");
+      }
+      
       const eventsData = await eventsResponse.json();
 
       if (!eventsData.success) {
         throw new Error("Failed to fetch events");
       }
 
+      // Filter events by organizer ID
+      const organizerEvents = eventsData.data.filter(
+        (event: any) => event.organizerId === organizerId
+      );
+
       // Fetch orders for all events
       const allOrders: Order[] = [];
-      for (const event of eventsData.data) {
+      for (const event of organizerEvents) {
         const ordersResponse = await fetch(`/api/events/${event.id}/orders`, {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -81,6 +110,7 @@ export default function OrdersManagementPage() {
       setOrders(allOrders);
     } catch (err: any) {
       setError(err.message || "An error occurred");
+      console.error("Fetch orders error:", err);
     } finally {
       setLoading(false);
     }

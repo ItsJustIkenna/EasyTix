@@ -124,11 +124,51 @@ export default function AnalyticsPage() {
   if (error || !analytics) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
+        <div className="text-center max-w-md mx-auto px-4">
           <BarChart3 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
           <h2 className="text-2xl font-semibold mb-2">Error loading analytics</h2>
-          <p className="text-muted-foreground mb-4">{error}</p>
-          <Button onClick={fetchAnalytics}>Try Again</Button>
+          <p className="text-muted-foreground mb-6">{error}</p>
+          <div className="flex gap-3 justify-center">
+            <Button variant="outline" asChild>
+              <Link href="/organizer/dashboard">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Dashboard
+              </Link>
+            </Button>
+            <Button onClick={fetchAnalytics}>Try Again</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Check if there's no data
+  if (analytics.eventCount === 0 || analytics.totalTicketsSold === 0) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center max-w-md mx-auto px-4">
+          <BarChart3 className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
+          <h2 className="text-2xl font-semibold mb-2">No Analytics Yet</h2>
+          <p className="text-muted-foreground mb-6">
+            {analytics.eventCount === 0 
+              ? "Create your first event to start seeing analytics."
+              : "Your events don't have any ticket sales yet. Share your events to start selling tickets!"}
+          </p>
+          <div className="flex gap-3 justify-center">
+            <Button variant="outline" asChild>
+              <Link href="/organizer/dashboard">
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to Dashboard
+              </Link>
+            </Button>
+            {analytics.eventCount === 0 && (
+              <Button asChild>
+                <Link href="/organizer/events/create">
+                  Create Event
+                </Link>
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     );

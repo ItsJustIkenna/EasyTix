@@ -236,9 +236,9 @@ export default function SignupPage() {
                         disabled={isLoading}
                       >
                         {showPassword ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
                           <Eye className="h-4 w-4" />
+                        ) : (
+                          <EyeOff className="h-4 w-4" />
                         )}
                       </Button>
                     </div>
@@ -271,9 +271,9 @@ export default function SignupPage() {
                         disabled={isLoading}
                       >
                         {showConfirmPassword ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
                           <Eye className="h-4 w-4" />
+                        ) : (
+                          <EyeOff className="h-4 w-4" />
                         )}
                       </Button>
                     </div>
@@ -338,6 +338,13 @@ export default function SignupPage() {
             Already have an account?{" "}
             <Link href="/login" className="text-primary hover:underline">
               Sign in
+            </Link>
+          </div>
+
+          <div className="text-center text-sm text-muted-foreground">
+            Want to host events?{" "}
+            <Link href="/organizer/register" className="text-primary hover:underline">
+              Register as Organizer
             </Link>
           </div>
 

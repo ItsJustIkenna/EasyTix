@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { getLocalStorage, removeLocalStorage } from "@/lib/localStorage";
 
@@ -11,10 +11,17 @@ export default function OrganizerLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const checkAuth = async () => {
+      // Skip auth check for register page
+      if (pathname === "/organizer/register") {
+        setLoading(false);
+        return;
+      }
+
       const token = getLocalStorage("token");
 
       if (!token) {
@@ -57,7 +64,7 @@ export default function OrganizerLayout({
     };
 
     checkAuth();
-  }, [router]);
+  }, [router, pathname]);
 
   if (loading) {
     return (

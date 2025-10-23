@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   HelpCircle,
   Search,
@@ -16,6 +17,7 @@ import {
   Users,
   Settings,
   BarChart3,
+  ArrowLeft,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -197,16 +199,24 @@ export default function OrganizerHelpPage() {
   return (
     <div className="container max-w-6xl py-8">
       {/* Header */}
-      <div className="mb-8 text-center">
-        <div className="flex justify-center mb-4">
-          <div className="p-3 bg-primary/10 rounded-full">
-            <HelpCircle className="h-12 w-12 text-primary" />
+      <div className="mb-8">
+        <Button variant="ghost" asChild className="mb-4">
+          <Link href="/organizer/dashboard">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </Link>
+        </Button>
+        <div className="text-center">
+          <div className="flex justify-center mb-4">
+            <div className="p-3 bg-primary/10 rounded-full">
+              <HelpCircle className="h-12 w-12 text-primary" />
+            </div>
           </div>
+          <h1 className="text-4xl font-bold mb-2">Help Center</h1>
+          <p className="text-xl text-muted-foreground">
+            Everything you need to know about managing events on EasyTix
+          </p>
         </div>
-        <h1 className="text-4xl font-bold mb-2">Help Center</h1>
-        <p className="text-xl text-muted-foreground">
-          Everything you need to know about managing events on EasyTix
-        </p>
       </div>
 
       {/* Search */}

@@ -8,7 +8,12 @@ A complete digital ticketing platform for local and semi-professional sports eve
 
 All core features implemented, security audited, and optimized. Database architecture enhanced with 22 performance indexes, comprehensive constraints, and zero-downtime migration strategy.
 
-**Recent Improvements:**
+**Recent Improvements (January 2025):**
+- ✅ UX bug fixes (password visibility icons, navigation, authentication)
+- ✅ Separate organizer registration flow with business details
+- ✅ Fixed ticket scanner camera access and event loading
+- ✅ Added back buttons for consistent navigation across organizer pages
+- ✅ Empty state handling with helpful CTAs
 - ✅ Frontend code quality audit (20 issues fixed)
 - ✅ Backend security audit (18 vulnerabilities patched)
 - ✅ Database architecture optimization (16 critical improvements)
@@ -42,11 +47,14 @@ All core features implemented, security audited, and optimized. Database archite
 - [x] Promo code management
 
 ### Platform Infrastructure ✅
-- [x] JWT authentication
+- [x] JWT authentication with bcrypt password hashing
+- [x] Separate registration flows (customers vs organizers)
+- [x] Role-based access control (CUSTOMER, ORGANIZER, ADMIN)
 - [x] PostgreSQL + Drizzle ORM
 - [x] Stripe webhooks for payment confirmation
 - [x] Email delivery (Resend)
-- [x] QR code generation
+- [x] QR code generation and validation
+- [x] Real-time camera scanning with html5-qrcode
 - [x] Capacity management
 - [x] Sold-out prevention
 - [x] Transaction safety
@@ -227,13 +235,91 @@ All core features implemented, security audited, and optimized. Database archite
 - Rate limiting (auth, API, promo codes)
 - SQL injection protection (parameterized queries)
 - XSS prevention (sanitization)
-- Password hashing (bcrypt)
+- Password hashing (bcrypt, 10 rounds)
+- JWT tokens (7-day expiry)
+- CSRF protection (origin validation)
+- Security headers (X-Frame-Options, CSP, etc.)
 - Environment isolation
 
 ### Deployment
 - **Hosting**: Vercel-ready
 - **Migrations**: Zero-downtime strategy
 - **Monitoring**: Pool events, error tracking
+
+## 🔐 Authentication & Registration
+
+EasyTix has **two distinct registration flows** for customers and organizers:
+
+### Customer Registration (`/signup`)
+Simple registration for ticket buyers:
+- **Required Fields**: First name, last name, email, phone (optional), password
+- **Role**: CUSTOMER
+- **Creates**: User account only
+- **Redirect**: Home page to browse events
+
+### Organizer Registration (`/organizer/register`)
+Comprehensive registration for event hosts:
+- **Personal Info**: First name, last name, email, phone, password
+- **Business Info**: Business name, business email, business phone, website (optional), description
+- **Business Address**: Street address, city, state, ZIP code
+- **Role**: ORGANIZER
+- **Creates**: User account + Organizer profile (linked via join table)
+- **Redirect**: Organizer dashboard
+
+### Security Features
+
+✅ **Password Requirements**
+- Minimum 8 characters
+- Must contain uppercase letter
+- Must contain lowercase letter
+- Must contain number
+- Must contain special character
+
+✅ **Password Storage**
+- Hashed with bcrypt (10 rounds)
+- Never stored in plaintext
+- Never sent after initial login
+- Not visible in URLs or logs
+
+✅ **Authentication Flow**
+```
+1. User submits email + password (POST request)
+2. Backend hashes password and compares with stored hash
+3. If valid: Generate JWT token with 7-day expiry
+4. Frontend stores token in localStorage
+5. All subsequent requests include token in Authorization header
+6. Backend validates token for protected routes
+```
+
+✅ **Rate Limiting**
+- 5 login attempts per 15 minutes per IP
+- 5 registration attempts per 15 minutes per IP
+- Prevents brute force attacks
+
+✅ **Production Recommendations**
+- ⚠️ **HTTPS required** - Currently localhost only, MUST use HTTPS in production
+- ⚠️ Strong JWT_SECRET environment variable
+- Optional: Two-factor authentication (2FA)
+- Optional: Email verification on signup
+- Optional: Password reset via email
+
+### Access Control
+
+| Route Pattern | Access |
+|--------------|--------|
+| `/` | Public |
+| `/events/*` | Public (browse events) |
+| `/signup`, `/login` | Public |
+| `/organizer/register` | Public (new organizers) |
+| `/checkout/*` | Authenticated customers |
+| `/tickets` | Authenticated customers |
+| `/orders` | Authenticated customers |
+| `/organizer/*` | Authenticated organizers only (except `/register`) |
+| `/api/auth/*` | Public (login, register) |
+| `/api/events` (GET) | Public |
+| `/api/events` (POST/PUT/DELETE) | Organizers only |
+| `/api/tickets/*` | Authenticated users |
+| `/api/organizer/*` | Organizers only |
 
 ## 📋 Prerequisites
 
@@ -791,9 +877,12 @@ Add them to your `.env` file.
 <summary><b>Creating Your First Event</b></summary>
 
 1. **Sign up as organizer**
-   - Go to `/signup`
-   - Toggle "I am an organizer"
-   - Fill in business details
+   - Go to `/organizer/register` (or click "Register as Organizer" from login/signup pages)
+   - Fill in personal information (name, email, phone, password)
+   - Fill in business details (business name, email, phone, website, description)
+   - Provide business address (street, city, state, ZIP)
+   - Agree to terms and conditions
+   - Submit registration (creates User + Organizer profiles)
 
 2. **Complete Stripe Connect onboarding**
    - Go to `/organizer/payouts`
@@ -835,10 +924,16 @@ Add them to your `.env` file.
 
 3. **Scan tickets at event**
    - Go to `/organizer/scanner`
-   - Select your event
-   - Allow camera access
-   - Scan QR codes as attendees arrive
+   - Select your event from dropdown
+   - Click "Start Scanning"
+   - Allow camera access when browser prompts
+   - Point camera at QR codes as attendees arrive
+   - Scanner automatically validates tickets and shows:
+     - ✓ Valid ticket (green) - attendee name, ticket type, price
+     - ⚠️ Already scanned (orange) - shows previous scan time
+     - ✗ Invalid ticket (red) - error message
    - View check-in count in real-time
+   - See last 10 scans in sidebar history
 
 </details>
 
@@ -1296,12 +1391,45 @@ Out of the box, this setup can handle:
 **Error:** Camera not starting or codes not scanning
 
 **Solutions:**
-1. Allow camera permissions in browser
-2. Must use HTTPS in production (camera requires secure context)
-3. Try different browser (Chrome/Safari recommended)
-4. Check console for errors
-5. Verify QR code is valid (test with phone camera first)
-6. Ensure adequate lighting for scanning
+1. **Camera permission**: Allow camera permissions when browser prompts
+2. **HTTPS required**: Camera API only works on HTTPS in production (localhost is OK for dev)
+3. **Browser compatibility**: Use Chrome, Safari, Edge, or Firefox (latest versions)
+4. **Check console**: Press F12 → Console tab for error messages
+5. **Common errors:**
+   - "HTML Element with id=qr-reader not found" → Page refreshed too quickly, try again
+   - "NotAllowedError" → Camera permission denied, check browser settings
+   - "NotFoundError" → No camera detected, connect a camera or use mobile device
+6. **Event selection**: Make sure an event is selected before clicking "Start Scanning"
+7. **Test QR code**: Verify QR code is valid by scanning with phone camera app first
+8. **Lighting**: Ensure adequate lighting for successful scanning
+9. **Distance**: Hold device 6-12 inches from QR code
+
+</details>
+
+<details>
+<summary><b>Organizer registration redirects to login</b></summary>
+
+**Error:** Clicking "Register as Organizer" goes to login page
+
+**Solutions:**
+1. Clear browser cache and hard refresh (Ctrl+Shift+R or Cmd+Shift+R)
+2. Restart development server: Stop and run `npm run dev` again
+3. Check browser console for errors
+4. Try navigating directly to: `http://localhost:3000/organizer/register`
+5. Verify `src/app/organizer/layout.tsx` excludes `/organizer/register` from auth check
+6. Check if you're already logged in (logout and try again)
+
+</details>
+
+<details>
+<summary><b>Password visibility icons backwards</b></summary>
+
+**Error:** Eye icon shows when password is hidden
+
+**Fixed:** This has been corrected. If you still see it:
+1. Clear browser cache
+2. Hard refresh the page (Ctrl+Shift+R)
+3. Verify you're on latest code version
 
 </details>
 

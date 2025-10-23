@@ -160,9 +160,9 @@ export default function LoginPage() {
                         tabIndex={-1}
                       >
                         {showPassword ? (
-                          <EyeOff className="h-4 w-4 text-muted-foreground" />
-                        ) : (
                           <Eye className="h-4 w-4 text-muted-foreground" />
+                        ) : (
+                          <EyeOff className="h-4 w-4 text-muted-foreground" />
                         )}
                       </Button>
                     </div>
@@ -217,6 +217,13 @@ export default function LoginPage() {
             Don't have an account?{" "}
             <Link href="/signup" className="text-primary hover:underline">
               Sign up
+            </Link>
+          </div>
+
+          <div className="text-center text-sm text-muted-foreground">
+            Want to host events?{" "}
+            <Link href="/organizer/register" className="text-primary hover:underline">
+              Register as Organizer
             </Link>
           </div>
 

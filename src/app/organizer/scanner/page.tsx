@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Html5QrcodeScanner } from "html5-qrcode";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, XCircle, AlertCircle, Loader2, Camera, ChevronLeft } from "lucide-react";
+import { CheckCircle2, XCircle, AlertCircle, Loader2, Camera, ChevronLeft, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -81,14 +81,33 @@ export default function ScannerPage() {
 
   const checkAuthAndFetchEvents = async () => {
     try {
+      const token = localStorage.getItem("token");
+      
+      if (!token) {
+        router.push("/login");
+        return;
+      }
+
       // Check authentication
-      const authResponse = await fetch("/api/auth/me");
+      const authResponse = await fetch("/api/auth/me", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      
       if (!authResponse.ok) {
         router.push("/login");
         return;
       }
 
-      const { user, organizer } = await authResponse.json();
+      const authData = await authResponse.json();
+      
+      if (!authData.success) {
+        router.push("/login");
+        return;
+      }
+
+      const { user, organizer } = authData.data;
       
       if (!organizer) {
         toast({
@@ -102,17 +121,34 @@ export default function ScannerPage() {
 
       setOrganizerId(organizer.id);
 
-      // Fetch organizer's events
-      const eventsResponse = await fetch(`/api/events?organizerId=${organizer.id}`);
+      // Fetch organizer's events - fetch PUBLISHED events only
+      const eventsResponse = await fetch(`/api/events?status=PUBLISHED&limit=100`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      
+      console.log("Events response status:", eventsResponse.status);
+      
       if (!eventsResponse.ok) {
+        const errorText = await eventsResponse.text();
+        console.error("Events response error:", errorText);
         throw new Error("Failed to fetch events");
       }
 
       const eventsData = await eventsResponse.json();
+      console.log("Events data:", eventsData);
       
-      // Filter for published events only and calculate ticket stats
-      const publishedEvents = eventsData
-        .filter((e: any) => e.status === "PUBLISHED")
+      if (!eventsData.success) {
+        console.error("Events data not successful:", eventsData);
+        throw new Error("Failed to fetch events");
+      }
+      
+      console.log("Events array:", eventsData.data);
+      
+      // Filter for organizer's events only and calculate ticket stats
+      const organizerEvents = eventsData.data.events
+        .filter((e: any) => e.organizerId === organizer.id)
         .map((e: any) => ({
           id: e.id,
           title: e.title,
@@ -122,10 +158,13 @@ export default function ScannerPage() {
           checkedInTickets: 0, // Will be fetched separately if needed
         }));
 
-      setEvents(publishedEvents);
+      console.log("Organizer events:", organizerEvents);
+      console.log("Organizer ID:", organizer.id);
+
+      setEvents(organizerEvents);
       
-      if (publishedEvents.length > 0) {
-        setSelectedEventId(publishedEvents[0].id);
+      if (organizerEvents.length > 0) {
+        setSelectedEventId(organizerEvents[0].id);
       }
     } catch (error) {
       console.error("Error:", error);
@@ -143,18 +182,21 @@ export default function ScannerPage() {
     setScanning(true);
     setScanResult(null);
 
-    const scanner = new Html5QrcodeScanner(
-      "qr-reader",
-      {
-        fps: 10,
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1.0,
-      },
-      false
-    );
+    // Wait for DOM to update before initializing scanner
+    setTimeout(() => {
+      const scanner = new Html5QrcodeScanner(
+        "qr-reader",
+        {
+          fps: 10,
+          qrbox: { width: 250, height: 250 },
+          aspectRatio: 1.0,
+        },
+        false
+      );
 
-    scanner.render(onScanSuccess, onScanError);
-    setHtml5QrcodeScanner(scanner);
+      scanner.render(onScanSuccess, onScanError);
+      setHtml5QrcodeScanner(scanner);
+    }, 100);
   };
 
   const stopScanning = () => {
@@ -267,6 +309,12 @@ export default function ScannerPage() {
   if (events.length === 0) {
     return (
       <div className="container mx-auto px-4 py-8">
+        <Button variant="ghost" asChild className="mb-4">
+          <Link href="/organizer/dashboard">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </Link>
+        </Button>
         <Card>
           <CardHeader>
             <CardTitle>No Events Available</CardTitle>
@@ -276,7 +324,7 @@ export default function ScannerPage() {
           </CardHeader>
           <CardContent>
             <Button asChild>
-              <Link href="/organizer/dashboard">Go to Dashboard</Link>
+              <Link href="/organizer/events/create">Create Event</Link>
             </Button>
           </CardContent>
         </Card>
@@ -289,18 +337,16 @@ export default function ScannerPage() {
       {/* Header */}
       <div className="border-b bg-card">
         <div className="container mx-auto px-4 py-4">
+          <Button variant="ghost" asChild className="mb-2">
+            <Link href="/organizer/dashboard">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Dashboard
+            </Link>
+          </Button>
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" size="sm" asChild>
-                <Link href="/organizer/dashboard">
-                  <ChevronLeft className="h-4 w-4 mr-2" />
-                  Back
-                </Link>
-              </Button>
-              <div>
-                <h1 className="text-2xl font-bold">Ticket Scanner</h1>
-                <p className="text-sm text-muted-foreground">Scan QR codes to check in attendees</p>
-              </div>
+            <div>
+              <h1 className="text-2xl font-bold">Ticket Scanner</h1>
+              <p className="text-sm text-muted-foreground">Scan QR codes to check in attendees</p>
             </div>
           </div>
         </div>
