@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Client } from "pg";
 import { verifyPassword, generateToken } from "@/lib/auth";
+import { rateLimitAuth } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
   try {
@@ -15,6 +16,27 @@ export async function POST(req: NextRequest) {
           error: "Email and password are required",
         },
         { status: 400 }
+      );
+    }
+
+    // Rate limiting based on IP address
+    const identifier = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "anonymous";
+    const rateLimit = await rateLimitAuth(identifier);
+    
+    if (!rateLimit.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Too many login attempts. Please try again in 15 minutes.",
+        },
+        { 
+          status: 429,
+          headers: {
+            "X-RateLimit-Limit": rateLimit.limit.toString(),
+            "X-RateLimit-Remaining": rateLimit.remaining.toString(),
+            "X-RateLimit-Reset": new Date(rateLimit.reset).toISOString(),
+          }
+        }
       );
     }
 

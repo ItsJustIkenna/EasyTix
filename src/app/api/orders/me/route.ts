@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
         .where(eq(orders.userId, userId))
         .orderBy(desc(orders.createdAt));
 
-      await closeDb(client);
+      await closeDb();
 
       // Format the response
       const formattedOrders = userOrders.map((item) => ({
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
         summary,
       });
     } catch (error) {
-      await closeDb(client);
+      await closeDb();
       throw error;
     }
   } catch (error) {

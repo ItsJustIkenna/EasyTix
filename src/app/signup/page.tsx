@@ -27,6 +27,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { setLocalStorage, setLocalStorageJSON } from "@/lib/localStorage";
 
 const signupSchema = z.object({
   firstName: z.string().min(1, "First name is required"),
@@ -98,8 +99,8 @@ export default function SignupPage() {
 
       if (result.success) {
         // Store token in localStorage
-        localStorage.setItem("token", result.data.token);
-        localStorage.setItem("user", JSON.stringify(result.data.user));
+        setLocalStorage("token", result.data.token);
+        setLocalStorageJSON("user", result.data.user);
 
         // Redirect to events page
         router.push("/events");
@@ -112,10 +113,10 @@ export default function SignupPage() {
         }
         setIsLoading(false);
       }
-    } catch (err) {
+    } catch (error: unknown) {
       setError("An error occurred. Please try again.");
       setIsLoading(false);
-      console.error("Signup error:", err);
+      console.error("Signup error:", error);
     }
   };
 

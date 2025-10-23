@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
           .where(eq(orders.id, existingPayment[0].orderId))
           .limit(1);
           
-        await closeDb(client);
+        await closeDb();
         return NextResponse.json({
           orderId: existingOrder.id,
           message: "Order already processed",
@@ -215,7 +215,7 @@ export async function POST(request: NextRequest) {
         // Don't fail the whole request if email fails
       }
 
-      await closeDb(client);
+      await closeDb();
 
       return NextResponse.json({
         orderId: result.order.id,
@@ -223,7 +223,7 @@ export async function POST(request: NextRequest) {
         message: "Order created successfully",
       });
     } catch (error) {
-      await closeDb(client);
+      await closeDb();
       throw error;
     }
   } catch (error) {

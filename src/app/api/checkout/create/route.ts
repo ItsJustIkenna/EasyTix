@@ -1,35 +1,37 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { getDb, closeDb } from "@/db";
+import { db, pool } from "@/db";
 import { events, ticketTiers, promoCodes, orders, payments, tickets as ticketsTable } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
+import { checkoutSchema } from "@/lib/validation";
+import { toZonedTime } from 'date-fns-tz';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2024-06-20",
 });
 
 export async function POST(request: NextRequest) {
+  const client = await pool.connect();
+  
   try {
     const body = await request.json();
-    const { eventId, tickets, userId, promoCode } = body;
-
-    // Validate request
-    if (!eventId || !tickets || !Array.isArray(tickets) || tickets.length === 0) {
+    
+    // Validate request with Zod
+    const validation = checkoutSchema.safeParse(body);
+    if (!validation.success) {
       return NextResponse.json(
-        { error: "Invalid request: eventId and tickets array required" },
+        { 
+          error: "Invalid request data", 
+          details: validation.error.errors 
+        },
         { status: 400 }
       );
     }
 
-    if (!userId) {
-      return NextResponse.json(
-        { error: "User must be authenticated to purchase tickets" },
-        { status: 401 }
-      );
-    }
+    const { eventId, tickets, userId, promoCode } = validation.data;
 
-    // Connect to database
-    const { client, db } = await getDb();
+    // Start transaction with row-level locks to prevent race conditions
+    await client.query("BEGIN");
 
     try {
       // Fetch event details
@@ -40,19 +42,24 @@ export async function POST(request: NextRequest) {
         .limit(1);
 
       if (!event) {
-        await closeDb(client);
+        await client.query("ROLLBACK");
         return NextResponse.json({ error: "Event not found" }, { status: 404 });
       }
 
-      // Fetch ticket tier details and validate quantities
+      // Fetch and LOCK ticket tier rows to prevent concurrent modifications
       const tierIds = tickets.map((t: { tierId: string }) => t.tierId);
-      const tiers = await db
-        .select()
-        .from(ticketTiers)
-        .where(and(eq(ticketTiers.eventId, eventId)));
+      const tierQuery = `
+        SELECT id, name, "eventId", "basePrice", "platformMarkup", "platformFee", 
+               "totalQuantity", "soldQuantity", "isActive"
+        FROM "TicketTier"
+        WHERE "eventId" = $1 AND id = ANY($2)
+        FOR UPDATE
+      `;
+      const tierResult = await client.query(tierQuery, [eventId, tierIds]);
+      const tiers = tierResult.rows;
 
       if (tiers.length === 0) {
-        await closeDb(client);
+        await client.query("ROLLBACK");
         return NextResponse.json(
           { error: "No ticket tiers found for this event" },
           { status: 404 }
@@ -65,24 +72,23 @@ export async function POST(request: NextRequest) {
       let discountAmount = 0;
       let promoCodeId: string | null = null;
 
-      // Validate promo code if provided
+      // Validate promo code if provided and lock it
       if (promoCode) {
-        const [validPromoCode] = await db
-          .select()
-          .from(promoCodes)
-          .where(
-            and(
-              eq(promoCodes.code, promoCode.toUpperCase()),
-              eq(promoCodes.eventId, eventId),
-              eq(promoCodes.isActive, true)
-            )
-          )
-          .limit(1);
+        const promoQuery = `
+          SELECT id, code, "discountType", "discountValue", "maxUses", "currentUses",
+                 "validFrom", "validTo", "isActive"
+          FROM "PromoCode"
+          WHERE code = $1 AND "eventId" = $2 AND "isActive" = true
+          FOR UPDATE
+        `;
+        const promoResult = await client.query(promoQuery, [promoCode.toUpperCase(), eventId]);
 
-        if (validPromoCode) {
-          const now = new Date();
-          const validFrom = new Date(validPromoCode.validFrom);
-          const validTo = new Date(validPromoCode.validTo);
+        if (promoResult.rows.length > 0) {
+          const validPromoCode = promoResult.rows[0];
+          const eventTimezone = event.timezone || 'America/New_York';
+          const now = toZonedTime(new Date(), eventTimezone);
+          const validFrom = toZonedTime(new Date(validPromoCode.validFrom), eventTimezone);
+          const validTo = toZonedTime(new Date(validPromoCode.validTo), eventTimezone);
 
           if (
             now >= validFrom &&
@@ -96,19 +102,19 @@ export async function POST(request: NextRequest) {
       }
 
       for (const ticket of tickets) {
-        const tier = tiers.find((t) => t.id === ticket.tierId);
+        const tier = tiers.find((t: any) => t.id === ticket.tierId);
 
         if (!tier) {
-          await closeDb(client);
+          await client.query("ROLLBACK");
           return NextResponse.json(
             { error: `Ticket tier ${ticket.tierId} not found` },
             { status: 404 }
           );
         }
 
-        // Check availability
+        // Check availability with locked row (prevents race condition)
         if (tier.totalQuantity > 0 && tier.soldQuantity + ticket.quantity > tier.totalQuantity) {
-          await closeDb(client);
+          await client.query("ROLLBACK");
           return NextResponse.json(
             { error: `Not enough tickets available for ${tier.name}` },
             { status: 400 }
@@ -140,13 +146,13 @@ export async function POST(request: NextRequest) {
       // Apply promo code discount if valid
       let finalAmount = totalAmount;
       if (promoCodeId) {
-        const [promo] = await db
-          .select()
-          .from(promoCodes)
-          .where(eq(promoCodes.id, promoCodeId))
-          .limit(1);
+        const promoQuery = await client.query(
+          `SELECT id, "discountType", "discountValue" FROM "PromoCode" WHERE id = $1`,
+          [promoCodeId]
+        );
 
-        if (promo) {
+        if (promoQuery.rows.length > 0) {
+          const promo = promoQuery.rows[0];
           if (promo.discountType === "PERCENTAGE") {
             discountAmount = Math.floor((totalAmount * promo.discountValue) / 100);
           } else if (promo.discountType === "FIXED") {
@@ -197,7 +203,7 @@ export async function POST(request: NextRequest) {
 
       // Create ticket records for each ticket
       for (const ticket of tickets) {
-        const tier = tiers.find((t) => t.id === ticket.tierId);
+        const tier = tiers.find((t: any) => t.id === ticket.tierId);
         if (!tier) continue;
 
         // Create multiple tickets based on quantity
@@ -232,15 +238,18 @@ export async function POST(request: NextRequest) {
         customer_email: body.email || undefined,
       });
 
-      await closeDb(client);
+      // Commit transaction - capacity is reserved
+      await client.query("COMMIT");
+      client.release();
 
       return NextResponse.json({
         sessionId: session.id,
         url: session.url,
       });
-    } catch (error) {
-      await closeDb(client);
-      throw error;
+    } catch (innerError) {
+      await client.query("ROLLBACK");
+      client.release();
+      throw innerError;
     }
   } catch (error) {
     console.error("Checkout creation error:", error);

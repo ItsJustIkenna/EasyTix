@@ -1,16 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import {
   hashPassword,
   generateToken,
   sanitizeUser,
   validatePassword,
 } from "@/lib/auth";
+import { rateLimitAuth } from "@/lib/rate-limit";
+import { getDb } from "@/db";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { email, password, firstName, lastName, phone, role } = body;
+
+    // Rate limiting based on IP address
+    const identifier = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "anonymous";
+    const rateLimit = await rateLimitAuth(identifier);
+    
+    if (!rateLimit.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Too many registration attempts. Please try again in 15 minutes.",
+        },
+        { 
+          status: 429,
+          headers: {
+            "X-RateLimit-Limit": rateLimit.limit.toString(),
+            "X-RateLimit-Remaining": rateLimit.remaining.toString(),
+            "X-RateLimit-Reset": new Date(rateLimit.reset).toISOString(),
+          }
+        }
+      );
+    }
 
     // Validate required fields
     if (!email || !password || !firstName || !lastName) {
@@ -60,12 +82,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
-    });
+    const { client } = await getDb();
 
-    if (existingUser) {
+    // Check if user already exists
+    const existingUsers = await client.query(
+      `SELECT id FROM "User" WHERE LOWER(email) = LOWER($1)`,
+      [email]
+    );
+
+    if (existingUsers.rows.length > 0) {
       return NextResponse.json(
         {
           success: false,
@@ -79,16 +104,14 @@ export async function POST(req: NextRequest) {
     const passwordHash = await hashPassword(password);
 
     // Create user
-    const user = await prisma.user.create({
-      data: {
-        email: email.toLowerCase(),
-        passwordHash,
-        firstName,
-        lastName,
-        phone: phone || null,
-        role: userRole,
-      },
-    });
+    const result = await client.query(
+      `INSERT INTO "User" (id, email, "passwordHash", "firstName", "lastName", phone, role, "createdAt", "updatedAt")
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW(), NOW())
+       RETURNING id, email, "firstName", "lastName", phone, role, "createdAt", "updatedAt"`,
+      [email.toLowerCase(), passwordHash, firstName, lastName, phone || null, userRole]
+    );
+
+    const user = result.rows[0];
 
     // Generate token
     const token = generateToken({

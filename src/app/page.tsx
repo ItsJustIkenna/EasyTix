@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Zap, Users, QrCode, BarChart3, Ticket, Share2, CheckCircle2, LogOut, User, LayoutDashboard } from "lucide-react";
+import { getLocalStorage, removeLocalStorage } from "@/lib/localStorage";
 
 interface UserData {
   user: {
@@ -38,7 +39,7 @@ export default function Home() {
   }, []);
 
   const checkAuth = async () => {
-    const token = localStorage.getItem("token");
+    const token = getLocalStorage("token");
     if (!token) {
       setLoading(false);
       return;
@@ -56,7 +57,7 @@ export default function Home() {
       if (data.success) {
         setUser(data.data);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Auth check failed:", error);
     } finally {
       setLoading(false);
@@ -64,10 +65,10 @@ export default function Home() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    removeLocalStorage("token");
+    removeLocalStorage("user");
     setUser(null);
-    router.refresh();
+    router.push("/login");
   };
 
   const getInitials = () => {

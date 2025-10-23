@@ -1,6 +1,17 @@
 import * as bcrypt from "bcryptjs";
 import * as jwt from "jsonwebtoken";
-import { User } from "@prisma/client";
+
+type User = {
+  id: string;
+  email: string;
+  passwordHash: string;
+  firstName: string | null;
+  lastName: string | null;
+  phone: string | null;
+  role: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
 const JWT_SECRET = process.env.NEXTAUTH_SECRET || "your-secret-key";
 const JWT_EXPIRES_IN = "7d"; // Token expires in 7 days

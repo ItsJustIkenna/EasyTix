@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import { getLocalStorage, removeLocalStorage } from "@/lib/localStorage";
 
 export default function OrganizerLayout({
   children,
@@ -14,7 +15,7 @@ export default function OrganizerLayout({
 
   useEffect(() => {
     const checkAuth = async () => {
-      const token = localStorage.getItem("token");
+      const token = getLocalStorage("token");
 
       if (!token) {
         router.push("/login");
@@ -31,8 +32,8 @@ export default function OrganizerLayout({
         const data = await response.json();
 
         if (!data.success) {
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
+          removeLocalStorage("token");
+          removeLocalStorage("user");
           router.push("/login");
           return;
         }
@@ -47,10 +48,10 @@ export default function OrganizerLayout({
         }
 
         setLoading(false);
-      } catch (error) {
+      } catch (error: unknown) {
         console.error("Auth check failed:", error);
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
+        removeLocalStorage("token");
+        removeLocalStorage("user");
         router.push("/login");
       }
     };

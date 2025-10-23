@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { promoCodes, events } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
+import { toZonedTime } from 'date-fns-tz';
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,6 +14,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { success: false, error: "Code and event ID are required" },
         { status: 400 }
+      );
+    }
+
+    // Get event to access timezone
+    const [event] = await database
+      .select()
+      .from(events)
+      .where(eq(events.id, eventId))
+      .limit(1);
+
+    if (!event) {
+      return NextResponse.json(
+        { success: false, error: "Event not found" },
+        { status: 404 }
       );
     }
 
@@ -36,10 +51,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if code is still valid (date range)
-    const now = new Date();
-    const validFrom = new Date(promoCode.validFrom);
-    const validTo = new Date(promoCode.validTo);
+    // Check if code is still valid (date range) using event timezone
+    const eventTimezone = event.timezone || 'America/New_York';
+    const now = toZonedTime(new Date(), eventTimezone);
+    const validFrom = toZonedTime(new Date(promoCode.validFrom), eventTimezone);
+    const validTo = toZonedTime(new Date(promoCode.validTo), eventTimezone);
 
     if (now < validFrom) {
       return NextResponse.json(

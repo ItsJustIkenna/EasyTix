@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { getDb } from "@/db";
+import { db } from "@/db";
 import { orders, payments, tickets as ticketsTable, ticketTiers, promoCodes } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { Resend } from "resend";
 import QRCode from "qrcode";
 
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     const session = event.data.object as Stripe.Checkout.Session;
 
     try {
-      const { db: database } = await getDb();
+      const database = db;
 
       // Get order ID from metadata
       const orderId = session.metadata?.orderId;
@@ -100,42 +100,47 @@ export async function POST(request: NextRequest) {
             updatedAt: new Date(),
           })
           .where(eq(ticketsTable.id, ticket.id));
-
-        // Increment soldQuantity for ticket tier
-        const [tier] = await database
-          .select()
-          .from(ticketTiers)
-          .where(eq(ticketTiers.id, ticket.tierId))
-          .limit(1);
-
-        if (tier) {
-          await database
-            .update(ticketTiers)
-            .set({
-              soldQuantity: tier.soldQuantity + 1,
-              updatedAt: new Date(),
-            })
-            .where(eq(ticketTiers.id, tier.id));
-        }
       }
 
-      // Update promo code usage if applicable
+      // Batch update soldQuantity for all tiers (fixes N+1 query problem)
+      const tierCounts = orderTickets.reduce((acc: Record<string, number>, ticket: any) => {
+        acc[ticket.tierId] = (acc[ticket.tierId] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
+
+      // Update each tier's soldQuantity atomically
+      for (const [tierId, count] of Object.entries(tierCounts)) {
+        await database
+          .update(ticketTiers)
+          .set({
+            soldQuantity: sql`${ticketTiers.soldQuantity} + ${count}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(ticketTiers.id, tierId));
+      }
+
+      // Update promo code usage atomically (fixes race condition)
       const promoCodeId = session.metadata?.promoCodeId;
       if (promoCodeId) {
-        const [promoCode] = await database
-          .select()
-          .from(promoCodes)
-          .where(eq(promoCodes.id, promoCodeId))
-          .limit(1);
+        // Atomic increment with maxUses check
+        const result = await database
+          .update(promoCodes)
+          .set({
+            currentUses: sql`${promoCodes.currentUses} + 1`,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(promoCodes.id, promoCodeId),
+              // Only increment if under limit (prevents exceeding maxUses)
+              sql`(${promoCodes.maxUses} IS NULL OR ${promoCodes.currentUses} < ${promoCodes.maxUses})`
+            )
+          )
+          .returning();
 
-        if (promoCode) {
-          await database
-            .update(promoCodes)
-            .set({
-              currentUses: promoCode.currentUses + 1,
-              updatedAt: new Date(),
-            })
-            .where(eq(promoCodes.id, promoCodeId));
+        if (result.length === 0) {
+          console.warn(`Promo code ${promoCodeId} exceeded maxUses, but payment already processed`);
+          // Note: Payment succeeded, so we don't fail the webhook
         }
       }
 
@@ -167,7 +172,7 @@ export async function POST(request: NextRequest) {
           // Create ticket HTML
           const ticketHtml = updatedTickets
             .map(
-              (ticket, index) => `
+              (ticket: any, index: number) => `
               <div style="margin-bottom: 20px; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px; background-color: #f9fafb;">
                 <h3 style="margin: 0 0 10px 0;">Ticket ${index + 1}</h3>
                 <p style="margin: 5px 0;"><strong>Ticket ID:</strong> ${ticket.id}</p>

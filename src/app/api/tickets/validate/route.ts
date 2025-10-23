@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
         .limit(1);
 
       if (!event) {
-        await closeDb(client);
+        await closeDb();
         return NextResponse.json(
           { error: "Event not found or you don't have permission to scan for this event" },
           { status: 403 }
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
         .limit(1);
 
       if (!ticket) {
-        await closeDb(client);
+        await closeDb();
         return NextResponse.json(
           { error: "Ticket not found" },
           { status: 404 }
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
 
       // Verify ticket belongs to the correct event
       if (ticket.ticket.eventId !== eventId) {
-        await closeDb(client);
+        await closeDb();
         return NextResponse.json(
           { error: "Ticket does not belong to this event" },
           { status: 400 }
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
 
       // Check if ticket is already checked in
       if (ticket.ticket.checkedInAt) {
-        await closeDb(client);
+        await closeDb();
         return NextResponse.json(
           {
             error: "Ticket already scanned",
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
 
       // Check ticket status
       if (ticket.ticket.status === "CANCELLED") {
-        await closeDb(client);
+        await closeDb();
         return NextResponse.json(
           {
             error: "Ticket has been cancelled",
@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
       }
 
       if (ticket.ticket.status === "REFUNDED") {
-        await closeDb(client);
+        await closeDb();
         return NextResponse.json(
           {
             error: "Ticket has been refunded",
@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
         .where(eq(tickets.id, ticketId))
         .returning();
 
-      await closeDb(client);
+      await closeDb();
 
       // Return success with ticket details
       return NextResponse.json({
@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
         },
       });
     } catch (error) {
-      await closeDb(client);
+      await closeDb();
       throw error;
     }
   } catch (error) {

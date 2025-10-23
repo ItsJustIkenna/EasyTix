@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
-import { getDb } from "@/db";
-import { orders, tickets, refunds, payments, events, organizers } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { db, pool } from "@/db";
+import { orders, tickets, refunds, payments, events, organizers, ticketTiers, users } from "@/db/schema";
+import { eq, and, sql } from "drizzle-orm";
 import { verifyToken } from "@/lib/auth";
+import { getOrganizerFromToken } from "@/lib/auth-utils";
 import { Resend } from "resend";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -16,8 +17,10 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { orderId: string } }
 ) {
+  const client = await pool.connect();
+  
   try {
-    const { db: database } = await getDb();
+    const database = db;
     const orderId = params.orderId;
 
     // Verify authentication
@@ -34,6 +37,15 @@ export async function POST(
       return NextResponse.json(
         { success: false, error: "Invalid token" },
         { status: 401 }
+      );
+    }
+
+    // Get organizer using shared utility (no internal API call)
+    const organizer = await getOrganizerFromToken(token);
+    if (!organizer) {
+      return NextResponse.json(
+        { success: false, error: "Not an organizer" },
+        { status: 403 }
       );
     }
 
@@ -60,25 +72,7 @@ export async function POST(
       );
     }
 
-    // Verify organizer owns the event
-    const userResponse = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/auth/me`,
-      {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      }
-    );
-    const userData = await userResponse.json();
-
-    if (!userData.success || !userData.data.organizer?.id) {
-      return NextResponse.json(
-        { success: false, error: "Not an organizer" },
-        { status: 403 }
-      );
-    }
-
-    if (order.event.organizerId !== userData.data.organizer.id) {
+    if (order.event.organizerId !== organizer.id) {
       return NextResponse.json(
         { success: false, error: "You do not own this event" },
         { status: 403 }
@@ -117,112 +111,156 @@ export async function POST(
       );
     }
 
-    // Process Stripe refund
-    let stripeRefundId: string | null = null;
+    // Start transaction for refund processing
+    await client.query("BEGIN");
+
     try {
-      if (order.payment.stripePaymentIntentId) {
-        const refund = await stripe.refunds.create({
-          payment_intent: order.payment.stripePaymentIntentId,
-          amount: amountToRefund,
-          reason: "requested_by_customer",
-          metadata: {
-            orderId: order.order.id,
-            eventId: order.event.id,
-            organizerId: order.event.organizerId,
-          },
-        });
-        stripeRefundId = refund.id;
+      // Process Stripe refund first (before DB changes)
+      let stripeRefundId: string | null = null;
+      try {
+        if (order.payment.stripePaymentIntentId) {
+          const refund = await stripe.refunds.create({
+            payment_intent: order.payment.stripePaymentIntentId,
+            amount: amountToRefund,
+            reason: "requested_by_customer",
+            metadata: {
+              orderId: order.order.id,
+              eventId: order.event.id,
+              organizerId: order.event.organizerId,
+            },
+          });
+          stripeRefundId = refund.id;
+        }
+      } catch (stripeError: any) {
+        await client.query("ROLLBACK");
+        client.release();
+        console.error("Stripe refund error:", stripeError);
+        return NextResponse.json(
+          { success: false, error: `Stripe refund failed: ${stripeError.message}` },
+          { status: 500 }
+        );
       }
-    } catch (stripeError: any) {
-      console.error("Stripe refund error:", stripeError);
-      return NextResponse.json(
-        { success: false, error: `Stripe refund failed: ${stripeError.message}` },
-        { status: 500 }
-      );
-    }
 
-    // Create refund record
-    const [refund] = await database
-      .insert(refunds)
-      .values({
-        orderId: order.order.id,
-        amount: amountToRefund,
-        reason: reason || "Refund requested by organizer",
-        status: "COMPLETED",
-        stripeRefundId,
-        processedBy: decoded.userId,
-        processedAt: new Date(),
-      })
-      .returning();
+      // Create refund record
+      const [refund] = await database
+        .insert(refunds)
+        .values({
+          orderId: order.order.id,
+          amount: amountToRefund,
+          reason: reason || "Refund requested by organizer",
+          status: "COMPLETED",
+          stripeRefundId,
+          processedBy: decoded.userId,
+          processedAt: new Date(),
+        })
+        .returning();
 
-    // Update order status
-    await database
-      .update(orders)
-      .set({
-        status: amountToRefund >= order.order.totalAmount ? "REFUNDED" : "COMPLETED",
-        updatedAt: new Date(),
-      })
-      .where(eq(orders.id, orderId));
-
-    // Update payment status
-    if (order.payment) {
+      // Update order status
       await database
-        .update(payments)
+        .update(orders)
+        .set({
+          status: amountToRefund >= order.order.totalAmount ? "REFUNDED" : "COMPLETED",
+          updatedAt: new Date(),
+        })
+        .where(eq(orders.id, orderId));
+
+      // Update payment status
+      if (order.payment) {
+        await database
+          .update(payments)
+          .set({
+            status: "REFUNDED",
+          })
+          .where(eq(payments.id, order.payment.id));
+      }
+
+      // Get all tickets for this order
+      const orderTickets = await database
+        .select()
+        .from(tickets)
+        .where(eq(tickets.orderId, orderId));
+
+      // Update ticket statuses
+      await database
+        .update(tickets)
         .set({
           status: "REFUNDED",
+          updatedAt: new Date(),
         })
-        .where(eq(payments.id, order.payment.id));
-    }
+        .where(eq(tickets.orderId, orderId));
 
-    // Update ticket statuses
-    await database
-      .update(tickets)
-      .set({
-        status: "REFUNDED",
-        updatedAt: new Date(),
-      })
-      .where(eq(tickets.orderId, orderId));
+      // Return tickets to tier inventory (decrement soldQuantity)
+      const tierCounts = orderTickets.reduce((acc: Record<string, number>, ticket: any) => {
+        acc[ticket.tierId] = (acc[ticket.tierId] || 0) + 1;
+        return acc;
+      }, {} as Record<string, number>);
 
-    // Send refund confirmation email
-    try {
-      const [user] = await database
-        .select()
-        .from(orders)
-        .where(eq(orders.id, orderId))
-        .limit(1);
-
-      if (user) {
-        await resend.emails.send({
-          from: "EasyTix <onboarding@resend.dev>",
-          to: user.userId, // Note: This should be the user's email, you may need to join with users table
-          subject: `Refund Processed: ${order.event.title}`,
-          html: `
-            <!DOCTYPE html>
-            <html>
-              <body style="font-family: Arial, sans-serif;">
-                <h2>Refund Processed</h2>
-                <p>Your refund for <strong>${order.event.title}</strong> has been processed.</p>
-                <p><strong>Refund Amount:</strong> $${(amountToRefund / 100).toFixed(2)}</p>
-                <p><strong>Reason:</strong> ${reason || "Refund requested by organizer"}</p>
-                <p>The refund will appear in your account within 5-10 business days.</p>
-                <p>If you have any questions, please contact the event organizer.</p>
-              </body>
-            </html>
-          `,
-        });
+      for (const [tierId, count] of Object.entries(tierCounts)) {
+        await database
+          .update(ticketTiers)
+          .set({
+            soldQuantity: sql`GREATEST(0, ${ticketTiers.soldQuantity} - ${count})`,
+            updatedAt: new Date(),
+          })
+          .where(eq(ticketTiers.id, tierId));
       }
-    } catch (emailError) {
-      console.error("Failed to send refund email:", emailError);
-      // Continue even if email fails
-    }
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        refund,
-        message: "Refund processed successfully",
-      },
-    });
+      // Commit transaction
+      await client.query("COMMIT");
+      client.release();
+
+      // Send refund confirmation email (outside transaction - non-critical)
+      try {
+        const [user] = await database
+          .select()
+          .from(users)
+          .where(eq(users.id, order.order.userId))
+          .limit(1);
+
+        if (user && user.email) {
+          await resend.emails.send({
+            from: "EasyTix <onboarding@resend.dev>",
+            to: user.email,
+            subject: `Refund Processed: ${order.event.title}`,
+            html: `
+              <!DOCTYPE html>
+              <html>
+                <body style="font-family: Arial, sans-serif;">
+                  <h2>Refund Processed</h2>
+                  <p>Your refund for <strong>${order.event.title}</strong> has been processed.</p>
+                  <p><strong>Refund Amount:</strong> $${(amountToRefund / 100).toFixed(2)}</p>
+                  <p><strong>Reason:</strong> ${reason || "Refund requested by organizer"}</p>
+                  <p>The refund will appear in your account within 5-10 business days.</p>
+                  <p>If you have any questions, please contact the event organizer.</p>
+                </body>
+              </html>
+            `,
+          });
+        }
+      } catch (emailError) {
+        console.error("Failed to send refund email:", emailError);
+        // Continue even if email fails
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: {
+          refund,
+          message: "Refund processed successfully",
+        },
+      });
+    } catch (innerError) {
+      await client.query("ROLLBACK");
+      client.release();
+      
+      // Log for manual intervention if Stripe succeeded but DB failed
+      console.error("CRITICAL: Refund transaction failed after Stripe refund", {
+        orderId,
+        error: innerError,
+      });
+      
+      throw innerError;
+    }
   } catch (error) {
     console.error("Refund processing error:", error);
     return NextResponse.json(

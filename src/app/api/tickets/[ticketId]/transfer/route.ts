@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDb } from "@/db";
-import { tickets, orders, events, ticketTiers } from "@/db/schema";
-import { eq, and } from "drizzle-orm";
+import { db } from "@/db";
+import { tickets, orders, events, ticketTiers, users } from "@/db/schema";
+import { eq, and, isNull, sql } from "drizzle-orm";
 import { verifyToken } from "@/lib/auth";
 import QRCode from "qrcode";
 import { Resend } from "resend";
+import { toZonedTime } from 'date-fns-tz';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -13,7 +14,7 @@ export async function POST(
   { params }: { params: { ticketId: string } }
 ) {
   try {
-    const { db: database } = await getDb();
+    const database = db;
     const ticketId = params.ticketId;
     const body = await request.json();
     const { recipientEmail, recipientName } = body;
@@ -95,9 +96,12 @@ export async function POST(
       );
     }
 
-    // Check if event has already passed
-    const eventDate = new Date(ticket.event.startDate);
-    if (eventDate < new Date()) {
+    // Check if event has already passed (use event timezone)
+    const eventTimezone = ticket.event.timezone || 'America/New_York';
+    const eventDate = toZonedTime(new Date(ticket.event.startDate), eventTimezone);
+    const nowInEventTz = toZonedTime(new Date(), eventTimezone);
+    
+    if (eventDate < nowInEventTz) {
       return NextResponse.json(
         { success: false, error: "Cannot transfer tickets for past events" },
         { status: 400 }
@@ -128,8 +132,10 @@ export async function POST(
       width: 300,
     });
 
-    // Update ticket with new owner information
-    await database
+    // Atomic update: verify ownership and not already transferred in WHERE clause
+    // This prevents race condition where ticket is transferred twice
+    // We use attendeeEmail as indicator of transfer (if it differs from order userId's email)
+    const result = await database
       .update(tickets)
       .set({
         attendeeEmail: recipientEmail,
@@ -137,7 +143,25 @@ export async function POST(
         qrCode: qrCodeDataUrl,
         updatedAt: new Date(),
       })
-      .where(eq(tickets.id, ticketId));
+      .where(
+        and(
+          eq(tickets.id, ticketId),
+          eq(tickets.status, "CONFIRMED"), // Re-verify status atomically
+          eq(tickets.userId, userId) // Re-verify ownership atomically
+        )
+      )
+      .returning();
+
+    // Check if update succeeded
+    if (result.length === 0) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: "Transfer failed - ticket may have been transferred or status changed" 
+        },
+        { status: 409 } // Conflict
+      );
+    }
 
     // Send email to new ticket owner
     try {

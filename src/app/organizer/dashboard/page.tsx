@@ -33,6 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Progress } from "@/components/ui/progress";
+import { getLocalStorage, removeLocalStorage } from "@/lib/localStorage";
 
 interface Event {
   id: string;
@@ -40,6 +41,7 @@ interface Event {
   startDate: string;
   coverImage: string | null;
   status: string;
+  organizerId: string;
   ticketTiers: Array<{
     totalQuantity: number;
     soldQuantity: number;
@@ -50,7 +52,13 @@ interface Event {
 }
 
 interface UserData {
-  user: any;
+  user: {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    role: string;
+  };
   organizer?: {
     id: string;
     businessName: string;
@@ -60,6 +68,7 @@ interface UserData {
     id: string;
     businessName: string;
   }>;
+  isOrganizer: boolean;
 }
 
 export default function OrganizerDashboard() {
@@ -75,7 +84,7 @@ export default function OrganizerDashboard() {
   }, []);
 
   const checkAuth = async () => {
-    const token = localStorage.getItem("token");
+    const token = getLocalStorage("token");
     if (!token) {
       router.push("/login");
       return;
@@ -98,7 +107,7 @@ export default function OrganizerDashboard() {
 
       setUserData(data.data);
       await fetchEvents(data.data);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Auth check failed:", error);
       router.push("/login");
     } finally {
@@ -108,7 +117,7 @@ export default function OrganizerDashboard() {
 
   const fetchEvents = async (user: UserData) => {
     try {
-      const token = localStorage.getItem("token");
+      const token = getLocalStorage("token");
       
       // Fetch all events (admin can see all, organizers see their own)
       const response = await fetch("/api/events?limit=100", {
@@ -124,21 +133,21 @@ export default function OrganizerDashboard() {
         let filteredEvents = data.data.events;
         if (user.organizer?.id) {
           // Filter to show only events belonging to this organizer
-          filteredEvents = data.data.events.filter((event: any) =>
+          filteredEvents = data.data.events.filter((event: Event) =>
             event.organizerId === user.organizer!.id
           );
         }
         console.log('[Dashboard] Filtered events:', filteredEvents.length, 'organizerId:', user.organizer?.id);
         setEvents(filteredEvents);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Failed to fetch events:", error);
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    removeLocalStorage("token");
+    removeLocalStorage("user");
     router.push("/login");
   };
 

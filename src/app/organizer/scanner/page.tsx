@@ -55,8 +55,7 @@ export default function ScannerPage() {
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
   const [organizerId, setOrganizerId] = useState<string>("");
-  
-  let html5QrcodeScanner: Html5QrcodeScanner | null = null;
+  const [html5QrcodeScanner, setHtml5QrcodeScanner] = useState<Html5QrcodeScanner | null>(null);
 
   useEffect(() => {
     checkAuthAndFetchEvents();
@@ -68,6 +67,17 @@ export default function ScannerPage() {
       setSelectedEvent(event || null);
     }
   }, [selectedEventId, events]);
+
+  // Cleanup scanner on unmount
+  useEffect(() => {
+    return () => {
+      if (html5QrcodeScanner) {
+        html5QrcodeScanner.clear().catch(() => {
+          // Ignore cleanup errors
+        });
+      }
+    };
+  }, [html5QrcodeScanner]);
 
   const checkAuthAndFetchEvents = async () => {
     try {
@@ -133,7 +143,7 @@ export default function ScannerPage() {
     setScanning(true);
     setScanResult(null);
 
-    html5QrcodeScanner = new Html5QrcodeScanner(
+    const scanner = new Html5QrcodeScanner(
       "qr-reader",
       {
         fps: 10,
@@ -143,13 +153,16 @@ export default function ScannerPage() {
       false
     );
 
-    html5QrcodeScanner.render(onScanSuccess, onScanError);
+    scanner.render(onScanSuccess, onScanError);
+    setHtml5QrcodeScanner(scanner);
   };
 
   const stopScanning = () => {
     if (html5QrcodeScanner) {
-      html5QrcodeScanner.clear();
-      html5QrcodeScanner = null;
+      html5QrcodeScanner.clear().catch(() => {
+        // Ignore errors during stop
+      });
+      setHtml5QrcodeScanner(null);
     }
     setScanning(false);
   };

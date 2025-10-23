@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Separator } from "@/components/ui/separator";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { getLocalStorage } from "@/lib/localStorage";
 
 interface UserProfile {
   user: {
@@ -63,7 +64,7 @@ export default function OrganizerProfilePage() {
   }, []);
 
   const fetchProfile = async () => {
-    const token = localStorage.getItem("token");
+    const token = getLocalStorage("token");
     if (!token) {
       router.push("/login");
       return;
@@ -102,7 +103,7 @@ export default function OrganizerProfilePage() {
         setState(data.data.organizer.state || "");
         setZipCode(data.data.organizer.zipCode || "");
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Failed to fetch profile:", error);
       toast({
         title: "Error",
@@ -116,7 +117,7 @@ export default function OrganizerProfilePage() {
 
   const handleSaveProfile = async () => {
     setSaving(true);
-    const token = localStorage.getItem("token");
+    const token = getLocalStorage("token");
 
     try {
       // Update user profile
@@ -174,11 +175,12 @@ export default function OrganizerProfilePage() {
 
       // Refresh profile
       await fetchProfile();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Save profile error:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to save profile";
       toast({
         title: "Error",
-        description: error.message || "Failed to save profile",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {

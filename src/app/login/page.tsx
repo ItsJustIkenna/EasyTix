@@ -27,6 +27,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { setLocalStorage, setLocalStorageJSON } from "@/lib/localStorage";
 
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
@@ -71,8 +72,8 @@ export default function LoginPage() {
 
       if (result.success) {
         // Store token in localStorage
-        localStorage.setItem("token", result.data.token);
-        localStorage.setItem("user", JSON.stringify(result.data.user));
+        setLocalStorage("token", result.data.token);
+        setLocalStorageJSON("user", result.data.user);
 
         // Redirect based on role
         if (result.data.isAdmin) {
@@ -86,10 +87,10 @@ export default function LoginPage() {
         setError(result.error || "Login failed");
         setIsLoading(false);
       }
-    } catch (err) {
+    } catch (error: unknown) {
       setError("An error occurred. Please try again.");
       setIsLoading(false);
-      console.error("Login error:", err);
+      console.error("Login error:", error);
     }
   };
 

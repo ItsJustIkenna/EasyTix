@@ -22,7 +22,7 @@ async function authenticate(req: NextRequest) {
 
     // Verify token
     const tokenResult = await client.query(
-      'SELECT * FROM "Token" WHERE token = $1 AND expires > NOW()',
+      'SELECT id, "userId", expires FROM "Token" WHERE token = $1 AND expires > NOW()',
       [token]
     );
 
@@ -40,7 +40,7 @@ async function authenticate(req: NextRequest) {
 
     // Get user
     const userResult = await client.query(
-      'SELECT * FROM "User" WHERE id = $1',
+      'SELECT id, email, "firstName", "lastName", phone, role, "isEmailVerified" FROM "User" WHERE id = $1',
       [tokenData.userId]
     );
 

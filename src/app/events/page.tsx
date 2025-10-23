@@ -89,7 +89,7 @@ export default function EventsPage() {
       } else {
         setError(data.error || "Failed to load events");
       }
-    } catch (err) {
+    } catch (err: unknown) {
       setError("Failed to load events");
       console.error("Error fetching events:", err);
     } finally {

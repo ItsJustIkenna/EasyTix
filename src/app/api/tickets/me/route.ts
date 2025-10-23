@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
         .where(eq(tickets.userId, userId))
         .orderBy(desc(tickets.createdAt));
 
-      await closeDb(client);
+      await closeDb();
 
       // Group tickets by event
       const ticketsByEvent = userTickets.reduce((acc: any, item) => {
@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
         total: userTickets.length,
       });
     } catch (error) {
-      await closeDb(client);
+      await closeDb();
       throw error;
     }
   } catch (error) {

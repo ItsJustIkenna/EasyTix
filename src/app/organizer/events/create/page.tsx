@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { getLocalStorage } from "@/lib/localStorage";
 
 const eventFormSchema = z.object({
   title: z.string().min(5, "Title must be at least 5 characters"),
@@ -115,7 +116,7 @@ export default function CreateEventPage() {
   const onSubmit = async (data: EventFormValues) => {
     setLoading(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = getLocalStorage("token");
 
       // Get user info to get organizer ID
       const userResponse = await fetch("/api/auth/me", {
@@ -181,12 +182,13 @@ export default function CreateEventPage() {
           variant: "destructive",
         });
       }
-    } catch (error) {
+    } catch (error: unknown) {
       toast({
         title: "Error creating event",
         description: "Failed to create event. Please try again.",
         variant: "destructive",
       });
+      console.error("Event creation error:", error);
     } finally {
       setLoading(false);
     }
